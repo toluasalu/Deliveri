@@ -1,5 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import * as Location from 'expo-location';
 import { Stack } from 'expo-router';
 import * as TaskManager from 'expo-task-manager';
@@ -7,10 +5,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import MapView, { Callout, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
-import { useLocationContext } from '../context/LocationProvider';
-
 import { Button } from '~/components/Button';
-import { getPatrolIDFromStorage, storeLocationDataToStorage } from '~/internals/data';
+import { useCreatePatrol } from '~/domains/hooks';
+import { storePatrolIDToStorage } from '~/internals/data';
 import { handleOpenSettings } from '~/internals/linking';
 import type { Location as LocationType } from '~/internals/location';
 
@@ -18,83 +15,11 @@ const LOCATION_TASK_NAME = 'background-location-task';
 
 TaskManager.defineTask(
   LOCATION_TASK_NAME,
-  ({ data, error }: { data: { locations: LocationType[] }; error: unknown }) => {
-    if (error) {
-      // Error occurred - check `error.message` for more details.
-      return;
-    }
-    if (data) {
-      const { locations } = data;
-      console.log('Locations;', locations);
-      // do something with the locations captured in the background
-      if (locations && locations.length > 0) {
-        console.log('Locations object:', locations);
-        const { latitude, longitude } = locations[0].coords;
-        console.log('Background Location:', { latitude, longitude });
-        // Function to get serial number from AsyncStorage
-        const getSerialNumber = async () => {
-          try {
-            const serial = await AsyncStorage.getItem('serialNumber');
-            return serial ? parseInt(serial, 10) : 0; // Default to 0 if not found
-          } catch (e) {
-            console.error('Error getting serial number:', e);
-            return 0;
-          }
-        };
-        // Function to update and store serial number
-        const updateSerialNumber = async (serial: number) => {
-          try {
-            await AsyncStorage.setItem('serialNumber', (serial + 1).toString());
-          } catch (e) {
-            console.error('Error updating serial number:', e);
-          }
-        };
-
-        // Using the function to check if patrolID is available
-        const checkPatrolID = async () => {
-          const patrolId = await getPatrolIDFromStorage();
-          const serialNumber = await getSerialNumber();
-          console.log('Serial No:', serialNumber);
-          if (patrolId) {
-            // patrolId is not null or undefined
-            axios
-              .post(
-                'https://cloudbases.in/forest_patrolling/PatrollingAppTestApi/update_patrolling_track',
-                {
-                  patrolling_id: patrolId,
-                  latitude,
-                  longitude,
-                  serialNo: serialNumber,
-                },
-                {
-                  headers: {
-                    'Content-Type': 'multipart/form-data',
-                  },
-                }
-              )
-              .then(function (response) {
-                console.log('Update Patrol Response:', response?.data?.data);
-              })
-              .catch(function (error) {
-                console.log('Update Patrol Error:', error);
-              });
-            // Store the updated serial number
-            await updateSerialNumber(serialNumber);
-            await storeLocationDataToStorage({ latitude, longitude });
-          } else {
-            // patrolId is null or undefined
-            console.log('No Patrol ID found');
-          }
-        };
-        checkPatrolID();
-      }
-    }
-  }
+  ({ data, error }: { data: { locations: LocationType[] }; error: unknown }) => {}
 );
 
 export default function Details() {
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const { markerObj, setMarkerObj } = useLocationContext();
+  // const { markerObj, setMarkerObj } = useLocationContext();
   const mapRef = useRef<MapView>(null);
   const [backgroundPermission, requestBackgroundPermission] = Location.useBackgroundPermissions();
   const [foregroundPermission, requestForegroundPermission] = Location.useForegroundPermissions();
@@ -106,10 +31,59 @@ export default function Details() {
     longitudeDelta: 0.0421,
   });
 
+  const marker = { latitude: region.latitude, longitude: region.longitude };
+
+  const createPatrolMutation = useCreatePatrol();
+
+  const createTrip = () => {
+    console.log('create trip');
+    const patrolling_name = 'Trip_' + Date.now();
+    createPatrolMutation.mutate(
+      {
+        patrolling_name,
+      },
+      {
+        onSuccess: () => {
+          Alert.alert('Patrol created successfully');
+
+          try {
+            storePatrolIDToStorage(patrolling_name);
+          } catch (error) {
+            console.log('Error saving patrolID:', error);
+            Alert.alert(`Error saving patrolID: ${error}`);
+          }
+        },
+      }
+    );
+  };
+
   useEffect(() => {
-    setMarkerObj({ latitude: region.latitude, longitude: region.longitude });
-    mapRef.current?.animateToRegion(region, 3 * 1000);
-  }, [region]);
+    (async () => {
+      try {
+        // check for location and start pushing location to background
+        if (backgroundPermission?.granted) {
+          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+            accuracy: Location.Accuracy.Highest,
+          });
+          if (foregroundPermission?.granted) {
+            // get current location, set region and our object marker
+            const currentLocation = await Location.getCurrentPositionAsync({});
+            // setLocation(currentLocation);
+            const newRegion = {
+              latitude: currentLocation?.coords.latitude,
+              longitude: currentLocation?.coords.longitude,
+              latitudeDelta: 0.0622,
+              longitudeDelta: 0.0421,
+            };
+            setRegion(newRegion);
+            mapRef.current?.animateToRegion(newRegion, 3 * 1000);
+          }
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    })();
+  }, [foregroundPermission?.granted]);
 
   if (!backgroundPermission?.granted) {
     return (
@@ -119,6 +93,7 @@ export default function Details() {
       </View>
     );
   }
+
   if (!foregroundPermission?.granted) {
     return (
       <View>
@@ -130,7 +105,18 @@ export default function Details() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Details' }} />
+      <Stack.Screen
+        options={{
+          title: 'Details',
+          headerRight: () => (
+            <Button
+              title="Create Patrol"
+              onPress={createTrip}
+              loading={createPatrolMutation.isPending}
+            />
+          ),
+        }}
+      />
       <View style={styles.container}>
         <MapView
           style={styles.map}
@@ -138,8 +124,8 @@ export default function Details() {
           ref={mapRef}
           initialRegion={region}
           showsBuildings>
-          {markerObj && (
-            <Marker coordinate={markerObj} pinColor="red">
+          {marker && (
+            <Marker coordinate={marker} pinColor="red">
               <Callout>
                 <View style={{ padding: 10 }}>
                   <Text style={{ fontSize: 22 }}>Your Location</Text>

@@ -12,11 +12,12 @@ export const storeLocationDataToStorage = async (value: {
   }
 };
 
+const patrolIDKey = 'patrol-id';
+
 export const getPatrolIDFromStorage = async () => {
-  try {
-    return await AsyncStorage.getItem('patrolID');
-  } catch (e) {
-    // saving error
-    console.error('Error getting patrolID:', e);
-  }
+  return AsyncStorage.getItem(patrolIDKey);
+};
+
+export const storePatrolIDToStorage = async (value: string) => {
+  return AsyncStorage.setItem(patrolIDKey, value);
 };

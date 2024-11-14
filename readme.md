@@ -8,9 +8,9 @@
 
 Details page
 
-- Get Permission for foreground and background
-- start a patrol
-- generate patrolID
+<!-- - Get Permission for foreground and background -->
+<!-- - generate patrolID -->
+<!-- - start a patrol -->
 
 - When in Background
 - Get location
