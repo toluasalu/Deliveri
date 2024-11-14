@@ -13,16 +13,24 @@ import type { Location as LocationType } from '~/internals/location';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
+const defaultLocationOptions: Location.LocationOptions = {
+  accuracy: Location.Accuracy.Highest,
+  distanceInterval: 1,
+  timeInterval: 1000,
+  mayShowUserSettingsDialog: true,
+};
+
 TaskManager.defineTask(
   LOCATION_TASK_NAME,
   ({ data, error }: { data: { locations: LocationType[] }; error: unknown }) => {}
 );
 
+let subscription: { remove: () => void } | null = null;
 export default function Details() {
   // const { markerObj, setMarkerObj } = useLocationContext();
   const mapRef = useRef<MapView>(null);
-  const [backgroundPermission, requestBackgroundPermission] = Location.useBackgroundPermissions();
-  const [foregroundPermission, requestForegroundPermission] = Location.useForegroundPermissions();
+  const [backgroundPermission] = Location.useBackgroundPermissions();
+  const [foregroundPermission] = Location.useForegroundPermissions();
 
   const [region, setRegion] = useState({
     latitude: 9.1123704,
@@ -34,6 +42,27 @@ export default function Details() {
   const marker = { latitude: region.latitude, longitude: region.longitude };
 
   const createPatrolMutation = useCreatePatrol();
+
+  useEffect(() => {
+    (async () => {
+      if (foregroundPermission?.granted) {
+        subscription = await Location.watchPositionAsync(
+          defaultLocationOptions,
+          (currentLocation) => {
+            updateLocation(currentLocation);
+          }
+        );
+      }
+
+      if (backgroundPermission?.granted) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Highest,
+        });
+      }
+    })();
+
+    return () => subscription?.remove();
+  }, [foregroundPermission?.granted, backgroundPermission?.granted]);
 
   const createTrip = () => {
     console.log('create trip');
@@ -56,34 +85,6 @@ export default function Details() {
       }
     );
   };
-
-  useEffect(() => {
-    (async () => {
-      try {
-        // check for location and start pushing location to background
-        if (backgroundPermission?.granted) {
-          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-            accuracy: Location.Accuracy.Highest,
-          });
-          if (foregroundPermission?.granted) {
-            // get current location, set region and our object marker
-            const currentLocation = await Location.getCurrentPositionAsync({});
-            // setLocation(currentLocation);
-            const newRegion = {
-              latitude: currentLocation?.coords.latitude,
-              longitude: currentLocation?.coords.longitude,
-              latitudeDelta: 0.0622,
-              longitudeDelta: 0.0421,
-            };
-            setRegion(newRegion);
-            mapRef.current?.animateToRegion(newRegion, 3 * 1000);
-          }
-        }
-      } catch (error) {
-        console.error(error);
-      }
-    })();
-  }, [foregroundPermission?.granted]);
 
   if (!backgroundPermission?.granted) {
     return (
@@ -137,34 +138,53 @@ export default function Details() {
       </View>
     </>
   );
+  function cantAskAgain() {
+    console.log("can't ask again");
+
+    Alert.alert('Permission denied', 'Please enable permission in settings', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Open Settings',
+        onPress: async () => {
+          handleOpenSettings();
+        },
+      },
+    ]);
+  }
+
   async function onPress(type: 'background' | 'foreground') {
     const permission = type === 'background' ? backgroundPermission : foregroundPermission;
     const requestPermission =
-      type === 'background' ? requestBackgroundPermission : requestForegroundPermission;
+      type === 'background'
+        ? Location.requestBackgroundPermissionsAsync
+        : Location.requestForegroundPermissionsAsync;
 
     if (!permission?.canAskAgain) {
-      console.log("can't ask again");
-
-      Alert.alert('Permission denied', 'Please enable permission in settings', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Open Settings',
-          onPress: async () => {
-            handleOpenSettings();
-          },
-        },
-      ]);
-
+      cantAskAgain();
       return;
     }
 
-    if (!permission?.granted) {
-      if (await requestPermission()) {
-        // await takeAction(type);
-      }
+    if (permission?.granted) {
+      console.log('permission already granted');
     } else {
-      // await takeAction(type);
+      const newPermission = await requestPermission();
+      if (newPermission?.granted) {
+      } else {
+        handleOpenSettings();
+      }
     }
+  }
+
+  function updateLocation(currentLocation: Location.LocationObject) {
+    // setLocation(currentLocation);
+    const newRegion = {
+      latitude: currentLocation?.coords.latitude,
+      longitude: currentLocation?.coords.longitude,
+      latitudeDelta: 0.0622,
+      longitudeDelta: 0.0421,
+    };
+    setRegion(newRegion);
+    mapRef.current?.animateToRegion(newRegion, 3 * 1000);
   }
 }
 const styles = StyleSheet.create({
