@@ -6,7 +6,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import MapView, { Callout, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { Button } from '~/components/Button';
-import { useCreatePatrol } from '~/domains/hooks';
+import { useCreatePatrol, useUpdatePatrolTrack } from '~/domains/hooks';
 import { storePatrolIDToStorage } from '~/internals/data';
 import { handleOpenSettings } from '~/internals/linking';
 import type { Location as LocationType } from '~/internals/location';
@@ -42,6 +42,10 @@ export default function Details() {
   const marker = { latitude: region.latitude, longitude: region.longitude };
 
   const createPatrolMutation = useCreatePatrol();
+  const updatePatrolTrack = useUpdatePatrolTrack();
+  const [patrolId, setPatrolId] = React.useState<null | string>(null);
+
+  const serialNumber = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -50,6 +54,15 @@ export default function Details() {
           defaultLocationOptions,
           (currentLocation) => {
             updateLocation(currentLocation);
+            if (patrolId) {
+              updatePatrolTrack.mutate({
+                latitude: currentLocation?.coords.latitude,
+                longitude: currentLocation?.coords.longitude,
+                patrolId,
+                serialNumber: serialNumber.current,
+              });
+              serialNumber.current = serialNumber.current + 1;
+            }
           }
         );
       }
@@ -62,11 +75,11 @@ export default function Details() {
     })();
 
     return () => subscription?.remove();
-  }, [foregroundPermission?.granted, backgroundPermission?.granted]);
+  }, [foregroundPermission?.granted, backgroundPermission?.granted, patrolId]);
 
   const createTrip = () => {
-    console.log('create trip');
     const patrolling_name = 'Trip_' + Date.now();
+    console.log('create trip', patrolling_name);
     createPatrolMutation.mutate(
       {
         patrolling_name,
@@ -76,6 +89,7 @@ export default function Details() {
           Alert.alert('Patrol created successfully');
 
           try {
+            setPatrolId(patrolling_name);
             storePatrolIDToStorage(patrolling_name);
           } catch (error) {
             console.log('Error saving patrolID:', error);
@@ -108,7 +122,7 @@ export default function Details() {
     <>
       <Stack.Screen
         options={{
-          title: 'Details',
+          title: patrolId ? `Patrolling ${patrolId}` : 'Details',
           headerRight: () => (
             <Button
               title="Create Patrol"
