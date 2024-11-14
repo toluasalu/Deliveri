@@ -6,8 +6,9 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import MapView, { Callout, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { Button } from '~/components/Button';
+import { updatePatrolTrack } from '~/domains/api';
 import { useCreatePatrol, useUpdatePatrolTrack } from '~/domains/hooks';
-import { storePatrolIDToStorage } from '~/internals/data';
+import { getPatrolIDFromStorage, storePatrolIDToStorage } from '~/internals/data';
 import { handleOpenSettings } from '~/internals/linking';
 import type { Location as LocationType } from '~/internals/location';
 
@@ -22,7 +23,35 @@ const defaultLocationOptions: Location.LocationOptions = {
 
 TaskManager.defineTask(
   LOCATION_TASK_NAME,
-  ({ data, error }: { data: { locations: LocationType[] }; error: unknown }) => {}
+  async ({
+    data,
+    error,
+    executionInfo,
+  }: {
+    data: { locations: (LocationType | null)[] };
+    error: unknown;
+    executionInfo: { eventId: string };
+  }) => {
+    if (error) {
+      console.log('error', error);
+    }
+    if (data) {
+      try {
+        const currentLocation = data.locations[0];
+        const patrolId = await getPatrolIDFromStorage();
+        if (patrolId && currentLocation) {
+          updatePatrolTrack({
+            latitude: currentLocation?.coords.latitude,
+            longitude: currentLocation?.coords.longitude,
+            patrolId,
+            serialNumber: executionInfo.eventId,
+          });
+        }
+      } catch (error) {
+        console.log(`Error updating patrol track: ${error}, `);
+      }
+    }
+  }
 );
 
 let subscription: { remove: () => void } | null = null;

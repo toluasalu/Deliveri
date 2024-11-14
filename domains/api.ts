@@ -9,7 +9,7 @@ export const updatePatrolTrack = ({
   patrolId: string;
   latitude: number;
   longitude: number;
-  serialNumber: number;
+  serialNumber: number | string;
 }) => {
   return api.post(
     '/update_patrolling_track',
