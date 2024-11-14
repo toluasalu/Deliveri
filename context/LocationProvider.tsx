@@ -1,13 +1,6 @@
 import React, { createContext, PropsWithChildren, useContext, useState } from 'react';
 
 interface LocationContextType {
-  markerObj: { latitude: number; longitude: number } | null;
-  setMarkerObj: React.Dispatch<
-    React.SetStateAction<{
-      latitude: number;
-      longitude: number;
-    } | null>
-  >;
   patrolID: string | null;
   setPatrolID: React.Dispatch<React.SetStateAction<string | null>>;
 }
@@ -23,13 +16,10 @@ export const useLocationContext = (): LocationContextType => {
 };
 
 const LocationProvider = ({ children }: PropsWithChildren) => {
-  const [markerObj, setMarkerObj] = useState<{ latitude: number; longitude: number } | null>(null);
   const [patrolID, setPatrolID] = useState<string | null>(null);
   return (
     <LocationContext.Provider
       value={{
-        markerObj,
-        setMarkerObj,
         patrolID,
         setPatrolID,
       }}>
