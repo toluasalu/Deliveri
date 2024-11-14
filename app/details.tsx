@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import dayjs from 'dayjs';
 import * as Location from 'expo-location';
 import { Stack } from 'expo-router';
 import * as TaskManager from 'expo-task-manager';
@@ -10,8 +9,9 @@ import MapView, { Callout, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { useLocationContext } from '../context/LocationProvider';
 
-import { createNewDoc } from '~/firebaseConfig';
+import { Button } from '~/components/Button';
 import { getPatrolIDFromStorage, storeLocationDataToStorage } from '~/internals/data';
+import { handleOpenSettings } from '~/internals/linking';
 import type { Location as LocationType } from '~/internals/location';
 
 const LOCATION_TASK_NAME = 'background-location-task';
@@ -96,6 +96,8 @@ export default function Details() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const { markerObj, setMarkerObj } = useLocationContext();
   const mapRef = useRef<MapView>(null);
+  const [backgroundPermission, requestBackgroundPermission] = Location.useBackgroundPermissions();
+  const [foregroundPermission, requestForegroundPermission] = Location.useForegroundPermissions();
 
   const [region, setRegion] = useState({
     latitude: 9.1123704,
@@ -104,106 +106,28 @@ export default function Details() {
     longitudeDelta: 0.0421,
   });
 
-  const handleCreateDoc = async (lat: number, long: number) => {
-    const tripID = 'Trip_' + dayjs().format('YYYYMMDD_HHmmss'); // Example: "Trip_20241102_153045"
-    const collectionName = `Coordinates ${tripID}`;
-    const docRef = await createNewDoc(collectionName, lat, long);
-    if (docRef) {
-      console.log('Document created successfully');
-    }
-  };
-
-  useEffect(() => {
-    (async () => {
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      if (foregroundStatus !== 'granted') {
-        Alert.alert('Foreground Permission to access location was denied');
-        return;
-      }
-      if (foregroundStatus === 'granted') {
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-        if (backgroundStatus !== 'granted') {
-          Alert.alert('Background Permission to access location was denied');
-          return;
-        }
-        if (backgroundStatus === 'granted') {
-          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-            accuracy: Location.Accuracy.Highest,
-          });
-        }
-        const location = await Location.getCurrentPositionAsync({});
-        setLocation(location);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    const fetchLatestLocation = async () => {
-      try {
-        const storedLocation = await AsyncStorage.getItem('latestLocation');
-        if (storedLocation) {
-          const { latitude, longitude } = JSON.parse(storedLocation);
-          setMarkerObj({ latitude, longitude });
-          mapRef.current?.animateToRegion(
-            {
-              latitude,
-              longitude,
-              latitudeDelta: 0.0622,
-              longitudeDelta: 0.0421,
-            },
-            3000
-          );
-        }
-      } catch (err) {
-        console.error('Failed to load location from AsyncStorage:', err);
-      }
-    };
-
-    fetchLatestLocation();
-  }, []);
-
-  useEffect(() => {
-    if (!location) return; // Exit if location is not set yet
-    // Update the region state with the new latitude and longitude
-    setRegion((prevRegion) => ({
-      latitude: location?.coords.latitude,
-      longitude: location?.coords.longitude,
-      latitudeDelta: 0.0622,
-      longitudeDelta: 0.0421,
-    }));
-    handleCreateDoc(location?.coords.latitude, location?.coords.longitude);
-    const tripID = 'Trip_' + Date.now(); // Example of generating a unique name
-    axios
-      .post(
-        'https://cloudbases.in/forest_patrolling/PatrollingAppTestApi/start_patrolling',
-        {
-          patrolling_name: tripID,
-        },
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      )
-      .then(async (response) => {
-        console.log('Patrol Response:', response?.data?.data);
-        try {
-          await AsyncStorage.setItem('patrolID', response?.data?.data?.patrolling_id.toString());
-        } catch (e) {
-          // saving error
-          console.error('Error saving patrolID:', e);
-        }
-      })
-      .catch(function (error) {
-        console.log('Patrol Error:', error);
-      });
-    setMarkerObj({ latitude: location?.coords.latitude, longitude: location?.coords.longitude });
-  }, [location]);
-
   useEffect(() => {
     setMarkerObj({ latitude: region.latitude, longitude: region.longitude });
     mapRef.current?.animateToRegion(region, 3 * 1000);
   }, [region]);
+
+  if (!backgroundPermission?.granted) {
+    return (
+      <View>
+        <Text>Background Permission not granted</Text>
+        <Button title="Grant Permission" onPress={() => onPress('background')} />
+      </View>
+    );
+  }
+  if (!foregroundPermission?.granted) {
+    return (
+      <View>
+        <Text>Background Permission not granted</Text>
+        <Button title="Grant Permission" onPress={() => onPress('foreground')} />
+      </View>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: 'Details' }} />
@@ -227,6 +151,35 @@ export default function Details() {
       </View>
     </>
   );
+  async function onPress(type: 'background' | 'foreground') {
+    const permission = type === 'background' ? backgroundPermission : foregroundPermission;
+    const requestPermission =
+      type === 'background' ? requestBackgroundPermission : requestForegroundPermission;
+
+    if (!permission?.canAskAgain) {
+      console.log("can't ask again");
+
+      Alert.alert('Permission denied', 'Please enable permission in settings', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Open Settings',
+          onPress: async () => {
+            handleOpenSettings();
+          },
+        },
+      ]);
+
+      return;
+    }
+
+    if (!permission?.granted) {
+      if (await requestPermission()) {
+        // await takeAction(type);
+      }
+    } else {
+      // await takeAction(type);
+    }
+  }
 }
 const styles = StyleSheet.create({
   container: {

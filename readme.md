@@ -1,8 +1,8 @@
 <!-- project -->
 
 - Get live location in
-  - background
-  - foreground
+  <!-- - background -->
+  <!-- - foreground -->
 - Save location and send to api
 
 
