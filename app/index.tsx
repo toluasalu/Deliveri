@@ -1,12 +1,11 @@
 /* eslint-disable import/order */
-import { Stack, Link } from 'expo-router';
+import { Link, Stack } from 'expo-router';
+import React from 'react';
 import { FlatList } from 'react-native';
-import products from "../assets/data/products";
 import { Button } from '~/components/Button';
-import CartListItem from '~/components/CartListItem';
 import { Container } from '~/components/Container';
-import { ScreenContent } from '~/components/ScreenContent';
 import ProductListItem from '~/components/ProductListItem';
+import products from '../assets/data/products';
 
 export default function Home() {
   return (

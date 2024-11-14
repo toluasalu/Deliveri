@@ -3,7 +3,7 @@
 - Get live location in
   <!-- - background -->
   <!-- - foreground -->
-- Save location and send to api
+- Save location and send to api for **foreground**
 
 
 Details page
