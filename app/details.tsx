@@ -1,223 +1,166 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import MapView, { Marker, PROVIDER_GOOGLE, Polyline, AnimatedRegion, Callout } from 'react-native-maps';
-import { View, StyleSheet, Alert, Text } from 'react-native';
-import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import { createNewDoc } from 'firebaseConfig';
-import { useLocationContext } from '../context/LocationProvider';
-import { Button } from '../components/Button';
-import axios from 'axios';
-import dayjs from 'dayjs';
+import { Stack } from 'expo-router';
+import * as TaskManager from 'expo-task-manager';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, StyleSheet, Text, View } from 'react-native';
+import MapView, { Callout, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+
+import { Button } from '~/components/Button';
+import { updatePatrolTrack } from '~/domains/api';
+import { useCreatePatrol, useUpdatePatrolTrack } from '~/domains/hooks';
+import { getPatrolIDFromStorage, storePatrolIDToStorage } from '~/internals/data';
+import { handleOpenSettings } from '~/internals/linking';
+import type { Location as LocationType } from '~/internals/location';
+
 const LOCATION_TASK_NAME = 'background-location-task';
 
-TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }) => {
-  if (error) {
-    // Error occurred - check `error.message` for more details.
-    return;
-  }
-  if (data) {
-    const { locations } = data;
-    console.log("Locations;", locations);
-    // do something with the locations captured in the background
-    if (locations && locations.length > 0) {
-      console.log("Locations object:", locations);
-      const { latitude, longitude } = locations[0].coords;
-      console.log('Background Location:', { latitude, longitude });
-      // Function to get serial number from AsyncStorage
-      const getSerialNumber = async () => {
-        try {
-          const serial = await AsyncStorage.getItem('serialNumber');
-          return serial ? parseInt(serial, 10) : 0; // Default to 0 if not found
-        } catch (e) {
-          console.error('Error getting serial number:', e);
-          return 0;
-        }
-      };
-      // Function to update and store serial number
-      const updateSerialNumber = async (serial) => {
-        try {
-          await AsyncStorage.setItem('serialNumber', (serial + 1).toString());
-        } catch (e) {
-          console.error('Error updating serial number:', e);
-        }
-      };
-      const getData = async () => {
-        try {
-          return await AsyncStorage.getItem('patrolID');
-        } catch (e) {
-          // saving error
-          console.error('Error getting patrolID:', e);
-        }
-      };
+const defaultLocationOptions: Location.LocationOptions = {
+  accuracy: Location.Accuracy.Highest,
+  distanceInterval: 1,
+  timeInterval: 1000,
+  mayShowUserSettingsDialog: true,
+};
 
-      // Using the function to check if patrolID is available
-      const checkPatrolID = async () => {
-        const patrolId = await getData();
-        const serialNumber = await getSerialNumber();
-        console.log("Serial No:", serialNumber);
-        if (patrolId) {
-          // patrolId is not null or undefined
-          axios
-            .post(
-              'https://cloudbases.in/forest_patrolling/PatrollingAppTestApi/update_patrolling_track',
-              {
-                patrolling_id: patrolId,
-                latitude,
-                longitude,
-                serialNo: serialNumber
-              },
-              {
-                headers: {
-                  'Content-Type': 'multipart/form-data'
-                }
-              }
-            )
-            .then(function (response) {
-              console.log('Update Patrol Response:', response?.data?.data);
-            })
-            .catch(function (error) {
-              console.log('Update Patrol Error:', error);
-            });
-          // Store the updated serial number
-          await updateSerialNumber(serialNumber);
-          const storeData = async (value) => {
-            try {
-              await AsyncStorage.setItem('lastLocation', JSON.stringify(value));
-            } catch (e) {
-              // saving error
-              console.error('Error saving location:', e);
-            }
-          };
-
-          storeData({ latitude, longitude });
-        } else {
-          // patrolId is null or undefined
-          console.log('No Patrol ID found');
+TaskManager.defineTask(
+  LOCATION_TASK_NAME,
+  async ({
+    data,
+    error,
+    executionInfo,
+  }: {
+    data: { locations: (LocationType | null)[] };
+    error: unknown;
+    executionInfo: { eventId: string };
+  }) => {
+    if (error) {
+      console.log('error', error);
+    }
+    if (data) {
+      try {
+        const currentLocation = data.locations[0];
+        const patrolId = await getPatrolIDFromStorage();
+        if (patrolId && currentLocation) {
+          updatePatrolTrack({
+            latitude: currentLocation?.coords.latitude,
+            longitude: currentLocation?.coords.longitude,
+            patrolId,
+            serialNumber: executionInfo.eventId,
+          });
         }
-      };
-      checkPatrolID();
+      } catch (error) {
+        console.log(`Error updating patrol track: ${error}, `);
+      }
     }
   }
-});
+);
 
+let subscription: { remove: () => void } | null = null;
 export default function Details() {
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [errorMsg, setErrorMsg] = useState<null | string>(null);
-  const { markerObj, setMarkerObj } = useLocationContext();
+  // const { markerObj, setMarkerObj } = useLocationContext();
   const mapRef = useRef<MapView>(null);
+  const [backgroundPermission] = Location.useBackgroundPermissions();
+  const [foregroundPermission] = Location.useForegroundPermissions();
+
   const [region, setRegion] = useState({
     latitude: 9.1123704,
     longitude: 7.376144,
     latitudeDelta: 0.0622,
     longitudeDelta: 0.0421,
   });
-  // const [markerObj, setMarkerObj] = useState<{ latitude: number; longitude: number } | null>(null);
-  const handleCreateDoc = async (lat, long) => {
-    const tripID = 'Trip_' + dayjs().format('YYYYMMDD_HHmmss'); // Example: "Trip_20241102_153045"
-    const collectionName = `Coordinates ${tripID}`;
-    const docRef = await createNewDoc(
-      collectionName,
-      lat,
-      long
-    );
-    if (docRef) {
-      console.log('Document created successfully');
-    }
-  };
+
+  const marker = { latitude: region.latitude, longitude: region.longitude };
+
+  const createPatrolMutation = useCreatePatrol();
+  const updatePatrolTrack = useUpdatePatrolTrack();
+  const [patrolId, setPatrolId] = React.useState<null | string>(null);
+
+  const serialNumber = useRef(0);
 
   useEffect(() => {
     (async () => {
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      if (foregroundStatus !== 'granted') {
-        Alert.alert('Foreground Permission to access location was denied');
-        return;
+      if (foregroundPermission?.granted) {
+        subscription = await Location.watchPositionAsync(
+          defaultLocationOptions,
+          (currentLocation) => {
+            updateLocation(currentLocation);
+            if (patrolId) {
+              updatePatrolTrack.mutate({
+                latitude: currentLocation?.coords.latitude,
+                longitude: currentLocation?.coords.longitude,
+                patrolId,
+                serialNumber: serialNumber.current,
+              });
+              serialNumber.current = serialNumber.current + 1;
+            }
+          }
+        );
       }
-      if (foregroundStatus === 'granted') {
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-        if (backgroundStatus !== 'granted') {
-          Alert.alert('Background Permission to access location was denied');
-          return;
-        }
-        if (backgroundStatus === 'granted') {
-          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-            accuracy: Location.Accuracy.Highest,
-          });
-        }
-        const location = await Location.getCurrentPositionAsync({});
-        setLocation(location);
+
+      if (backgroundPermission?.granted) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Highest,
+        });
       }
     })();
-  }, []);
 
-  useEffect(() => {
-    const fetchLatestLocation = async () => {
-      try {
-        const storedLocation = await AsyncStorage.getItem('latestLocation');
-        if (storedLocation) {
-          const { latitude, longitude } = JSON.parse(storedLocation);
-          setMarkerObj({ latitude, longitude });
-          mapRef.current?.animateToRegion(
-            {
-              latitude,
-              longitude,
-              latitudeDelta: 0.0622,
-              longitudeDelta: 0.0421,
-            },
-            3000
-          );
-        }
-      } catch (err) {
-        console.error('Failed to load location from AsyncStorage:', err);
-      }
-    };
+    return () => subscription?.remove();
+  }, [foregroundPermission?.granted, backgroundPermission?.granted, patrolId]);
 
-    fetchLatestLocation();
-  }, []);
-
-  useEffect(() => {
-    if (!location) return; // Exit if location is not set yet
-    // Update the region state with the new latitude and longitude
-    setRegion((prevRegion) => ({
-      latitude: location?.coords.latitude,
-      longitude: location?.coords.longitude,
-      latitudeDelta: 0.0622,
-      longitudeDelta: 0.0421,
-    }));
-    handleCreateDoc(location?.coords.latitude, location?.coords.longitude);
-    const tripID = 'Trip_' + Date.now(); // Example of generating a unique name
-    axios.post('https://cloudbases.in/forest_patrolling/PatrollingAppTestApi/start_patrolling', {
-      patrolling_name: tripID,
-    },
+  const createTrip = () => {
+    const patrolling_name = 'Trip_' + Date.now();
+    console.log('create trip', patrolling_name);
+    createPatrolMutation.mutate(
       {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      }
-    )
-      .then(async (response) => {
-        console.log("Patrol Response:", response?.data?.data);
-        try {
-          await AsyncStorage.setItem('patrolID', response?.data?.data?.patrolling_id.toString());
-        } catch (e) {
-          // saving error
-          console.error('Error saving patrolID:', e);
-        }
-      })
-      .catch(function (error) {
-        console.log("Patrol Error:", error);
-      });
-    setMarkerObj({ latitude: location?.coords.latitude, longitude: location?.coords.longitude });
-  }, [location]);
+        patrolling_name,
+      },
+      {
+        onSuccess: () => {
+          Alert.alert('Patrol created successfully');
 
-  useEffect(() => {
-    setMarkerObj({ latitude: region.latitude, longitude: region.longitude });
-    mapRef.current?.animateToRegion(region, 3 * 1000);
-  }, [region]);
+          try {
+            setPatrolId(patrolling_name);
+            storePatrolIDToStorage(patrolling_name);
+          } catch (error) {
+            console.log('Error saving patrolID:', error);
+            Alert.alert(`Error saving patrolID: ${error}`);
+          }
+        },
+      }
+    );
+  };
+
+  if (!backgroundPermission?.granted) {
+    return (
+      <View>
+        <Text>Background Permission not granted</Text>
+        <Button title="Grant Permission" onPress={() => onPress('background')} />
+      </View>
+    );
+  }
+
+  if (!foregroundPermission?.granted) {
+    return (
+      <View>
+        <Text>Background Permission not granted</Text>
+        <Button title="Grant Permission" onPress={() => onPress('foreground')} />
+      </View>
+    );
+  }
+
   return (
     <>
-      <Stack.Screen options={{ title: 'Details' }} />
+      <Stack.Screen
+        options={{
+          title: patrolId ? `Patrolling ${patrolId}` : 'Details',
+          headerRight: () => (
+            <Button
+              title="Create Patrol"
+              onPress={createTrip}
+              loading={createPatrolMutation.isPending}
+            />
+          ),
+        }}
+      />
       <View style={styles.container}>
         <MapView
           style={styles.map}
@@ -225,8 +168,8 @@ export default function Details() {
           ref={mapRef}
           initialRegion={region}
           showsBuildings>
-          {markerObj && (
-            <Marker coordinate={markerObj} pinColor="red">
+          {marker && (
+            <Marker coordinate={marker} pinColor="red">
               <Callout>
                 <View style={{ padding: 10 }}>
                   <Text style={{ fontSize: 22 }}>Your Location</Text>
@@ -238,6 +181,54 @@ export default function Details() {
       </View>
     </>
   );
+  function cantAskAgain() {
+    console.log("can't ask again");
+
+    Alert.alert('Permission denied', 'Please enable permission in settings', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Open Settings',
+        onPress: async () => {
+          handleOpenSettings();
+        },
+      },
+    ]);
+  }
+
+  async function onPress(type: 'background' | 'foreground') {
+    const permission = type === 'background' ? backgroundPermission : foregroundPermission;
+    const requestPermission =
+      type === 'background'
+        ? Location.requestBackgroundPermissionsAsync
+        : Location.requestForegroundPermissionsAsync;
+
+    if (!permission?.canAskAgain) {
+      cantAskAgain();
+      return;
+    }
+
+    if (permission?.granted) {
+      console.log('permission already granted');
+    } else {
+      const newPermission = await requestPermission();
+      if (newPermission?.granted) {
+      } else {
+        handleOpenSettings();
+      }
+    }
+  }
+
+  function updateLocation(currentLocation: Location.LocationObject) {
+    // setLocation(currentLocation);
+    const newRegion = {
+      latitude: currentLocation?.coords.latitude,
+      longitude: currentLocation?.coords.longitude,
+      latitudeDelta: 0.0622,
+      longitudeDelta: 0.0421,
+    };
+    setRegion(newRegion);
+    mapRef.current?.animateToRegion(newRegion, 3 * 1000);
+  }
 }
 const styles = StyleSheet.create({
   container: {
@@ -251,7 +242,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 20,
     left: '50%',
-    transform: [{ translateX: -50 }]
-  }
+    transform: [{ translateX: -50 }],
+  },
 });
-

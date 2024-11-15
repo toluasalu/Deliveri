@@ -1,18 +1,29 @@
-import { forwardRef } from 'react';
-import { Text, TouchableOpacity, TouchableOpacityProps } from 'react-native';
+import React, { forwardRef } from 'react';
+import {
+  ActivityIndicator,
+  Text,
+  TouchableOpacity,
+  TouchableOpacityProps,
+  View,
+} from 'react-native';
 
 type ButtonProps = {
   title: string;
+  loading?: boolean;
 } & TouchableOpacityProps;
 
 export const Button = forwardRef<TouchableOpacity, ButtonProps>(
-  ({ title, ...touchableProps }, ref) => {
+  ({ title, loading = false, disabled, ...touchableProps }, ref) => {
     return (
       <TouchableOpacity
+        disabled={loading || disabled}
         ref={ref}
         {...touchableProps}
         className={`${styles.button} ${touchableProps.className}`}>
-        <Text className={styles.buttonText}>{title}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text className={styles.buttonText}>{title}</Text>
+          {loading ? <ActivityIndicator size="small" color="white" /> : null}
+        </View>
       </TouchableOpacity>
     );
   }
