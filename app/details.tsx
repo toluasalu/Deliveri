@@ -40,6 +40,7 @@ TaskManager.defineTask(
         const currentLocation = data.locations[0];
         const patrolId = await getPatrolIDFromStorage();
         if (patrolId && currentLocation) {
+          console.log(`Updating patrol track in background: ${patrolId}, with co-ordinates: ${currentLocation?.coords.latitude}, ${currentLocation?.coords.longitude}`);
           updatePatrolTrack({
             latitude: currentLocation?.coords.latitude,
             longitude: currentLocation?.coords.longitude,
@@ -71,7 +72,7 @@ export default function Details() {
   const marker = { latitude: region.latitude, longitude: region.longitude };
 
   const createPatrolMutation = useCreatePatrol();
-  const updatePatrolTrack = useUpdatePatrolTrack();
+  const updatePatrolTrackMutation = useUpdatePatrolTrack();
   const [patrolId, setPatrolId] = React.useState<null | string>(null);
 
   const serialNumber = useRef(0);
@@ -84,12 +85,21 @@ export default function Details() {
           (currentLocation) => {
             updateLocation(currentLocation);
             if (patrolId) {
-              updatePatrolTrack.mutate({
+              console.log(
+                `Updating patrol track in foreground: ${patrolId}, with co-ordinates: ${currentLocation?.coords.latitude}, ${currentLocation?.coords.longitude}`
+              );
+              updatePatrolTrackMutation.mutate({
                 latitude: currentLocation?.coords.latitude,
                 longitude: currentLocation?.coords.longitude,
                 patrolId,
                 serialNumber: serialNumber.current,
-              });
+              },
+                {
+                  onSuccess: () => {
+                    Alert.alert('Patrol updated successfully in foreground');
+                  },
+                }
+              );
               serialNumber.current = serialNumber.current + 1;
             }
           }
