@@ -124,12 +124,11 @@ export default function Details() {
         patrolling_name,
       },
       {
-        onSuccess: () => {
+        onSuccess: ({ data }) => {
           Alert.alert('Patrol created successfully');
-
           try {
-            setPatrolId(patrolling_name);
-            storePatrolIDToStorage(patrolling_name);
+            setPatrolId(data.data.patrolling_id.toString());
+            storePatrolIDToStorage(data.data.patrolling_id.toString());
           } catch (error) {
             console.log('Error saving patrolID:', error);
             Alert.alert(`Error saving patrolID: ${error}`);
