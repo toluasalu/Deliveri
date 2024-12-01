@@ -17,7 +17,7 @@ const LOCATION_TASK_NAME = 'background-location-task';
 const defaultLocationOptions: Location.LocationOptions = {
   accuracy: Location.Accuracy.Highest,
   distanceInterval: 1,
-  timeInterval: 1000,
+  timeInterval: 15000,
   mayShowUserSettingsDialog: true,
 };
 
@@ -74,38 +74,29 @@ export default function Details() {
   const createPatrolMutation = useCreatePatrol();
   const updatePatrolTrackMutation = useUpdatePatrolTrack();
   const [patrolId, setPatrolId] = React.useState<null | string>(null);
-
+  const subscriptionRef = useRef<Location.LocationSubscription | null>(null); // Correct scoping for subscription
   const serialNumber = useRef(0);
 
   useEffect(() => {
     (async () => {
       if (foregroundPermission?.granted) {
-        subscription = await Location.watchPositionAsync(
+        subscriptionRef.current = await Location.watchPositionAsync(
           defaultLocationOptions,
           (currentLocation) => {
             updateLocation(currentLocation);
             if (patrolId) {
-              console.log(
-                `Updating patrol track in foreground: ${patrolId}, with co-ordinates: ${currentLocation?.coords.latitude}, ${currentLocation?.coords.longitude}`
-              );
               updatePatrolTrackMutation.mutate({
                 latitude: currentLocation?.coords.latitude,
                 longitude: currentLocation?.coords.longitude,
                 patrolId,
                 serialNumber: serialNumber.current,
-              },
-                {
-                  onSuccess: () => {
-                    Alert.alert('Patrol updated successfully in foreground');
-                  },
-                }
+              }
               );
               serialNumber.current = serialNumber.current + 1;
             }
           }
         );
       }
-
       if (backgroundPermission?.granted) {
         await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
           accuracy: Location.Accuracy.Highest,
@@ -113,7 +104,12 @@ export default function Details() {
       }
     })();
 
-    return () => subscription?.remove();
+    return () => {
+      if (subscriptionRef.current) {
+        subscriptionRef.current.remove(); // Properly remove the subscription
+        subscriptionRef.current = null; // Reset the ref
+      }
+    };
   }, [foregroundPermission?.granted, backgroundPermission?.granted, patrolId]);
 
   const createTrip = () => {
@@ -142,7 +138,7 @@ export default function Details() {
     return (
       <View>
         <Text>Background Permission not granted</Text>
-        <Button title="Grant Permission" onPress={() => onPress('background')} />
+        <Button title="Grant Background" onPress={() => onPermission('background')} />
       </View>
     );
   }
@@ -150,8 +146,8 @@ export default function Details() {
   if (!foregroundPermission?.granted) {
     return (
       <View>
-        <Text>Background Permission not granted</Text>
-        <Button title="Grant Permission" onPress={() => onPress('foreground')} />
+        <Text>Foreground Permission not granted</Text>
+        <Button title="Grant Foreground" onPress={() => onPermission('foreground')} />
       </View>
     );
   }
@@ -204,7 +200,7 @@ export default function Details() {
     ]);
   }
 
-  async function onPress(type: 'background' | 'foreground') {
+  async function onPermission(type: 'background' | 'foreground') {
     const permission = type === 'background' ? backgroundPermission : foregroundPermission;
     const requestPermission =
       type === 'background'
